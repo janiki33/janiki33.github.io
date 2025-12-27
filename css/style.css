@@ -34,8 +34,9 @@ body {
     height: 100vh;
     position: relative;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
+
+    display: grid;
+    grid-template-rows: auto 1fr auto;
 }
 
 /* Desktop Optimierung: Begrenzte Breite für App-Feeling */
@@ -88,12 +89,11 @@ body {
 
 /* --- CAMERA VIEW --- */
 .camera-view {
-    flex: 1;
     position: relative;
     background-color: #f8f9fa;
+    overflow: hidden;
+    /* wichtig */
     display: flex;
-    justify-content: center;
-    align-items: center;
 }
 
 .live-badge {
