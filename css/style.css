@@ -24,14 +24,14 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100vh;
+    min-height: 100dvh;
 }
 
 /* --- APP CONTAINER (Mobile Frame simulation on Desktop) --- */
 .app-container {
     background-color: #fff;
     width: 100%;
-    height: 100vh;
+    height: 100dvh;
     position: relative;
     overflow: hidden;
 
