@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AR Loading Screen</title>
+
+    <style>
+        /* =========================
+       Grundlayout
+       ========================= */
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: black;
+            overflow: hidden;
+        }
+
+        /* Vollbild-Canvas für Shader-Effekte */
+        #loader-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Canvas für Loading-Screen Shader -->
+    <canvas id="loader-canvas"></canvas>
+
+    <script>
+        /* =========================
+           SHADER SOURCES
+           ========================= */
+
+        const vertexShaderSource = `#version 300 es
+in vec2 a_position;
+out vec2 vUv;
+
+void main() {
+    vUv = a_position * 0.5 + 0.5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+        const fragmentShaderSource = `#version 300 es
+precision highp float;
+
+in vec2 vUv;
+out vec4 fragColor;
+
+uniform float uTime;
+uniform vec2 uResolution;
+uniform sampler2D uMask;
+uniform float uOutro;
+
+void mainImage(out vec4 fragColorOut, in vec2 fragCoord) {
+    float density = 4.0;
+    float scale = 0.3;
+    float t = uTime * 0.0025;
+
+    vec2 uv = fragCoord / uResolution.xy;
+    uv.y *= uResolution.y / uResolution.x;
+    uv *= density;
+
+    for (float i = 1.0; i < 8.0; i++) {
+        uv.x += scale * sin(uv.y * i + t) - t * i * 10.0;
+        uv.y += scale * cos(uv.x * i + t) - sin(t * i);
+    }
+
+    vec3 col = 0.5 + 0.5 * sin(uTime + uv.xyx + vec3(0,2,4));
+    fragColorOut = vec4(col, 1.0);
+}
+
+void main() {
+    mainImage(fragColor, gl_FragCoord.xy);
+
+    // Maske korrekt ausgerichtet
+    vec2 maskUV = vUv;
+    float screenAspect = uResolution.x / uResolution.y;
+    maskUV.x = (maskUV.x - 0.5) * screenAspect + 0.5;
+
+    // Outro-Shrink (Logo schrumpft)
+    float scale = mix(1.0, 0.9, uOutro);
+    maskUV = (maskUV - 0.5) / scale + 0.5;
+
+    float mask = texture(uMask, maskUV).a;
+
+    // Fade-Out
+    float fade = smoothstep(1.0, 0.7, uOutro);
+
+    // Glow-Pulse während Outro
+    float pulse = sin(uOutro * 3.1415) * 0.3;
+
+    fragColor.rgb += pulse * mask;
+    fragColor.a *= mask * fade;
+}
+`;
+
+        /* =========================
+           WEBGL INITIALISIERUNG
+           ========================= */
+
+        const canvas = document.getElementById('loader-canvas');
+        const gl = canvas.getContext('webgl2');
+        if (!gl) alert('WebGL2 wird nicht unterstützt.');
+
+        function createShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+        const shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+        gl.useProgram(shaderProgram);
+
+        /* =========================
+           FULLSCREEN QUAD
+           ========================= */
+        const quadVertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+        const quadBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+
+        const aPosition = gl.getAttribLocation(shaderProgram, 'a_position');
+        gl.enableVertexAttribArray(aPosition);
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+
+        /* =========================
+           UNIFORMS
+           ========================= */
+        const uTime = gl.getUniformLocation(shaderProgram, 'uTime');
+        const uResolution = gl.getUniformLocation(shaderProgram, 'uResolution');
+        const uMask = gl.getUniformLocation(shaderProgram, 'uMask');
+        const uOutro = gl.getUniformLocation(shaderProgram, 'uOutro');
+
+        /* =========================
+           SVG MASK TEXTURE
+           ========================= */
+        const maskTexture = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, maskTexture);
+
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
+            gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+        gl.uniform1i(uMask, 0);
+
+        const logoImage = new Image();
+        logoImage.src = 'media/logo.svg';
+        logoImage.onload = () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = logoImage.width;
+            tempCanvas.height = logoImage.height;
+            const ctx = tempCanvas.getContext('2d');
+            ctx.drawImage(logoImage, 0, 0);
+
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.bindTexture(gl.TEXTURE_2D, maskTexture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA,
+                gl.UNSIGNED_BYTE, tempCanvas);
+        };
+
+        /* =========================
+           BLENDING
+           ========================= */
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+        /* =========================
+           RESIZE HANDLER
+           ========================= */
+        function resizeCanvas() {
+            canvas.width = canvas.clientWidth * devicePixelRatio;
+            canvas.height = canvas.clientHeight * devicePixelRatio;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.uniform2f(uResolution, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        /* =========================
+           RENDER + OUTRO ANIMATION
+           ========================= */
+        const startTime = performance.now();
+        const OUTRO_START = 2.0;    // Sekunden
+        const OUTRO_DURATION = 0.5; // Sekunden
+
+        function render(now) {
+            const elapsed = (now - startTime) / 1000;
+            gl.uniform1f(uTime, elapsed);
+
+            let outro = 0.0;
+            if (elapsed > OUTRO_START) {
+                outro = Math.min((elapsed - OUTRO_START) / OUTRO_DURATION, 1.0);
+            }
+            gl.uniform1f(uOutro, outro);
+
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            if (outro < 1.0) {
+                requestAnimationFrame(render);
+            } else {
+                canvas.style.display = 'none'; // Loader beendet
+            }
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+
+</html>
